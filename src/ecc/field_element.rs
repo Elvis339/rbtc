@@ -2,6 +2,14 @@ use num_bigint::BigInt;
 use std::fmt;
 use std::ops::{Add, Mul, Sub};
 
+/// Finite Field Definition
+/// A finite field is defined as a finite set of numbers and two operations `+` and `*` and properties:
+/// 1. Closed property; means if a and b are in the set, a + b and a * b are in the set.
+/// 2. Additive identity; means that 0 exists and has the property a + 0 = a
+/// 3. Multiplicative identity; means 1 exists and has the property a * 1 = a
+/// 4. Additive inverse; means if a is in the set, -a is in the set,
+/// which is defined as the value that makes a + (-a) = 0
+
 #[derive(Debug)]
 pub struct FieldElement {
     num: BigInt,
