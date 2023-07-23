@@ -20,7 +20,7 @@ impl Point {
         // x^3 + ax + b
         let curve_form = &x.pow(3).add(a.clone().mul(&x)).add(&b);
 
-        // y^3 = x^3 + ax + b
+        // y^2 = x^3 + ax + b
         if &y.pow(2) != curve_form {
             return Err(format!("Point(x={}, y={}) is not on the curve.", &x, &y));
         }
