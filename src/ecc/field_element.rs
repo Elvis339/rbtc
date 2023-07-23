@@ -1,5 +1,6 @@
+use num::pow;
 use std::fmt;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Mul, Sub};
 
 #[derive(Debug)]
 pub struct FieldElement {
@@ -13,6 +14,14 @@ impl FieldElement {
             return Err(format!("Num {} not in field range 0 to {}", num, prime - 1));
         }
         Ok(FieldElement { num, prime })
+    }
+
+    pub fn pow(&self, exp: usize) -> Result<FieldElement, String> {
+        if exp < 0 {
+            return Err("Exponent cannot be negative!".to_string());
+        }
+        let num = pow(self.num.clone(), exp) % &self.prime;
+        FieldElement::new(num, self.prime.clone())
     }
 }
 
@@ -57,6 +66,19 @@ impl Sub for FieldElement {
     }
 }
 
+/// a * b = (a * b) % p
+impl Mul for FieldElement {
+    type Output = Result<FieldElement, String>;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        if self.prime != rhs.prime {
+            return Err("Cannot subtract two numbers in different Fields.".to_string());
+        }
+        let num = (self.num * rhs.num) % self.prime;
+        FieldElement::new(num, self.prime.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ecc::field_element::FieldElement;
@@ -90,5 +112,19 @@ mod tests {
         let b = FieldElement::new(9, 19);
 
         assert_eq!(a.unwrap() - b.unwrap(), FieldElement::new(2, 19));
+    }
+
+    #[test]
+    fn multiply() {
+        let a = FieldElement::new(5, 19);
+        let b = FieldElement::new(3, 19);
+
+        assert_eq!(a.unwrap() * b.unwrap(), FieldElement::new(15, 19));
+    }
+
+    #[test]
+    fn pow() {
+        let a = FieldElement::new(7, 19);
+        assert_eq!(a.unwrap().pow(3), FieldElement::new(1, 19))
     }
 }
