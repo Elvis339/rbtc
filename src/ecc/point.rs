@@ -99,8 +99,8 @@ impl Add for Point {
         let x = self.x.clone().unwrap();
         let y = self.y.clone().unwrap();
 
-        let other_x = rhs.x.clone().unwrap();
-        let other_y = rhs.y.clone().unwrap();
+        let other_x = rhs.x.clone().unwrap_or(BigInt::from(0));
+        let other_y = rhs.y.clone().unwrap_or(BigInt::from(0));
 
         // Additive inverse (same x but different y, causing a vertical line)
         if x == y && y != other_y {
@@ -148,8 +148,14 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
             return Ok(self.clone());
         }
 
+        let x = self.x.clone().unwrap();
+        let y = self.y.clone().unwrap();
+
+        let other_x = rhs.x.clone().unwrap_or(BigInt::from(0));
+        let other_y = rhs.y.clone().unwrap_or(BigInt::from(0));
+
         // Additive inverse (same x but different y, causing a vertical line)
-        if self.x.clone().unwrap() == rhs.x.clone().unwrap() {
+        if x == other_x && y != other_y {
             if self.y.is_none() {
                 return Ok(rhs.clone());
             }
@@ -157,6 +163,19 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
             if rhs.y.is_none() {
                 return Ok(self.clone());
             }
+        }
+
+        // Point addition when x1 != x2
+        if x != other_x {
+            let slope = other_y.sub(&y).div(&other_x.clone().sub(&x));
+            let new_x = slope.pow(2).sub(&x).sub(&other_x);
+            let new_y = slope.mul(&x.sub(&new_x)).sub(&y);
+            return Ok(Point {
+                a: self.a.clone(),
+                b: self.b.clone(),
+                x: Some(new_x),
+                y: Some(new_y),
+            });
         }
 
         return Err("Invalid point.".to_string());
