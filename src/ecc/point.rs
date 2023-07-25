@@ -6,23 +6,42 @@ use std::ops::{Add, Mul};
 pub struct Point {
     a: BigInt,
     b: BigInt,
-    x: BigInt,
-    y: BigInt,
+    x: Option<BigInt>,
+    y: Option<BigInt>,
 }
 
 impl Point {
-    pub fn new(_a: i64, _b: i64, _x: i64, _y: i64) -> Result<Point, String> {
+    pub fn new(_a: i64, _b: i64, _x: Option<i64>, _y: Option<i64>) -> Result<Point, String> {
         let a = BigInt::from(_a);
         let b = BigInt::from(_b);
-        let x = BigInt::from(_x);
-        let y = BigInt::from(_y);
+
+        if _x.is_none() && _y.is_none() {
+            return Ok(Point {
+                a,
+                b,
+                x: None,
+                y: None,
+            });
+        }
+
+        let x = _x.map(|v| BigInt::from(v));
+        let y = _y.map(|v| BigInt::from(v));
 
         // x^3 + ax + b
-        let curve_form = &x.pow(3).add(a.clone().mul(&x)).add(&b);
+        let curve_form = &x
+            .clone()
+            .unwrap_or(BigInt::from(0))
+            .pow(3)
+            .add(a.clone().mul(&x.clone().unwrap_or(BigInt::from(0))))
+            .add(&b);
 
         // y^2 = x^3 + ax + b
-        if &y.pow(2) != curve_form {
-            return Err(format!("Point(x={}, y={}) is not on the curve.", &x, &y));
+        if &y.clone().unwrap_or(BigInt::from(0)).pow(2) != curve_form {
+            return Err(format!(
+                "Point(x={}, y={}) is not on the curve.",
+                &x.unwrap(),
+                &y.unwrap()
+            ));
         }
 
         return Ok(Point { a, b, x, y });
@@ -34,9 +53,9 @@ impl fmt::Display for Point {
         write!(
             f,
             "Point={}={} + {} + {}",
-            &self.y,
-            &self.x.pow(3),
-            self.a.clone().mul(&self.x),
+            &self.y.clone().unwrap_or(BigInt::from(0)),
+            &self.x.clone().unwrap_or(BigInt::from(0)).pow(3),
+            self.a.clone().mul(&self.x.clone().unwrap_or(BigInt::from(1))),
             &self.b
         )
     }
@@ -54,7 +73,7 @@ mod tests {
 
     #[test]
     fn error_when_points_are_not_on_the_curve() {
-        let p1 = Point::new(-1, -1, 5, 7);
+        let p1 = Point::new(-1, -1, Some(5), Some(7));
         assert_eq!(
             p1.unwrap_err(),
             "Point(x=5, y=7) is not on the curve.".to_string()
@@ -67,7 +86,7 @@ mod tests {
         let not = [(2, 4), (5, 7)];
 
         for n in not {
-            let not_point = Point::new(5, 7, n.0, n.1);
+            let not_point = Point::new(5, 7, Some(n.0), Some(n.1));
             assert_eq!(
                 not_point.unwrap_err(),
                 format!("Point(x={}, y={}) is not on the curve.", n.0, n.1)
@@ -78,8 +97,8 @@ mod tests {
         for o in on {
             let x = o.0;
             let y = o.1;
-            let point = Point::new(5, 7, x.clone(), y.clone());
-            assert_eq!(point.unwrap(), Point::new(5, 7, x, y).unwrap())
+            let point = Point::new(5, 7, Some(x.clone()), Some(y.clone()));
+            assert_eq!(point.unwrap(), Point::new(5, 7, Some(x), Some(y)).unwrap())
         }
     }
 }
