@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use std::fmt;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub struct Point {
@@ -96,8 +96,14 @@ impl Add for Point {
         }
         //
 
+        let x = self.x.clone().unwrap();
+        let y = self.y.clone().unwrap();
+
+        let other_x = rhs.x.clone().unwrap();
+        let other_y = rhs.y.clone().unwrap();
+
         // Additive inverse (same x but different y, causing a vertical line)
-        if self.x.clone().unwrap() == rhs.x.clone().unwrap() {
+        if x == y && y != other_y {
             if self.y.is_none() {
                 return Ok(rhs);
             }
@@ -105,6 +111,19 @@ impl Add for Point {
             if rhs.y.is_none() {
                 return Ok(self);
             }
+        }
+
+        // Point addition when x1 != x2
+        if x != other_x {
+            let slope = other_y.sub(&y).div(&other_x.clone().sub(&x));
+            let new_x = slope.pow(2).sub(&x).sub(&other_x);
+            let new_y = slope.mul(&x.sub(&new_x)).sub(&y);
+            return Ok(Point {
+                a: self.a,
+                b: self.b,
+                x: Some(new_x),
+                y: Some(new_y),
+            });
         }
 
         return Err("Invalid point.".to_string());
@@ -212,5 +231,17 @@ mod tests {
         let p2 = Point::new(-15, -1, Some(5), None);
 
         assert_eq!(p1.as_ref().unwrap() + p2.as_ref().unwrap(), p1,);
+    }
+
+    #[test]
+    // Addition when x1 != x2
+    fn add_diff_xs() {
+        let p1 = Point::new(5, 7, Some(2), Some(5));
+        let p2 = Point::new(5, 7, Some(-1), Some(-1));
+
+        assert_eq!(
+            p1.unwrap() + p2.unwrap(),
+            Point::new(5, 7, Some(3), Some(-7))
+        );
     }
 }
