@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use std::fmt;
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 
 /// Finite Field Definition
 /// A finite field is defined as a finite set of numbers and two operations `+` and `*` and properties:
@@ -10,31 +10,50 @@ use std::ops::{Add, Mul, Sub};
 /// 4. Additive inverse; means if a is in the set, -a is in the set,
 /// which is defined as the value that makes a + (-a) = 0
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FieldElement {
     num: BigInt,
     prime: BigInt,
 }
 
 impl FieldElement {
-    fn new(num: BigInt, prime: BigInt) -> Result<FieldElement, String> {
-        if num >= prime {
+    pub fn new(num: i64, prime: i64) -> Result<FieldElement, String> {
+        if num >= prime || num < 0 {
             return Err(format!("Num {} not in field range 0 to {}", num, prime - 1));
         }
-        Ok(FieldElement { num, prime })
+        Ok(FieldElement {
+            num: BigInt::from(num),
+            prime: BigInt::from(prime),
+        })
     }
 
-    pub fn pow(&self, exponent: BigInt) -> Result<FieldElement, String> {
-        // Handle negative exponent
-        // Fermat's little theorem holds true for every: a^{p-1} = 1
-        // This fact means we can multiply by a^{p-1} as many times as we want
+    pub fn get_num(&self) -> &BigInt {
+        &self.num
+    }
+
+    pub fn get_prime(&self) -> &BigInt {
+        &self.prime
+    }
+
+    pub fn pow_mod(&self, exponent: BigInt) -> FieldElement {
         let mut n = exponent;
+        let prime = &self.prime;
         while n < BigInt::from(0) {
-            n += &self.prime - 1
+            n += prime - 1;
         }
-        //
-        let num = self.num.modpow(&n, &self.prime);
-        FieldElement::new(num, self.prime.clone())
+        let num = self.num.modpow(&n, &prime);
+        FieldElement {
+            num,
+            prime: prime.clone(),
+        }
+    }
+
+    pub fn convert<T: TryFrom<BigInt>>(&self) -> Result<(T, T), &'static str> {
+        let num = T::try_from(self.num.clone()).map_err(|_| "Overflow while converting num!")?;
+        let prime =
+            T::try_from(self.prime.clone()).map_err(|_| "Overflow while converting prime!")?;
+
+        Ok((num, prime))
     }
 }
 
@@ -61,8 +80,10 @@ impl Add for FieldElement {
         if self.prime != rhs.prime {
             return Err("Cannot add two numbers in different Fields.".to_string());
         }
-        let num = self.num.add(rhs.num) % self.prime.clone();
-        FieldElement::new(num, self.prime.clone())
+        let prime = self.prime;
+        let add = self.num + rhs.num;
+        let num = add % prime.clone();
+        Ok(FieldElement { num, prime })
     }
 }
 
@@ -74,9 +95,15 @@ impl Sub for FieldElement {
         if self.prime != rhs.prime {
             return Err("Cannot subtract two numbers in different Fields.".to_string());
         }
-        let p = &self.prime;
-        let num = self.num.sub(rhs.num) % p;
-        FieldElement::new(num, self.prime)
+        let prime = self.prime;
+        let sub = self.num - rhs.num;
+        let mut num = sub % prime.clone();
+
+        if num < BigInt::from(0) {
+            num += prime.clone();
+        }
+
+        Ok(FieldElement { num, prime })
     }
 }
 
@@ -88,81 +115,113 @@ impl Mul for FieldElement {
         if self.prime != rhs.prime {
             return Err("Cannot multiply two numbers in different Fields.".to_string());
         }
-        let p = &self.prime;
-        let num = self.num.mul(rhs.num) % p;
-        FieldElement::new(num, self.prime)
+        let prime = self.prime;
+        let mul = self.num * rhs.num;
+        let num = mul % prime.clone();
+        Ok(FieldElement { num, prime })
+    }
+}
+
+// p = 19
+// 2/7 = 2*7^(19-2) = 2 * 7^17 = 465261027974414 % 19 = 3
+impl Div for FieldElement {
+    type Output = Result<FieldElement, String>;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        if self.prime != rhs.prime {
+            return Err("Cannot multiply two numbers in different Fields.".to_string());
+        }
+        let prime = self.prime;
+        let num = self.num * rhs.num.modpow(&prime.clone().sub(2), &prime) % prime.clone();
+        Ok(FieldElement { num, prime })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ecc::field_element::FieldElement;
-    use num_bigint::BigInt;
+    use super::*;
 
-    #[test]
-    fn cannot_set_larger_num_then_prime() {
-        let fe = FieldElement::new(BigInt::from(10), BigInt::from(5));
-        assert_eq!(fe.unwrap_err(), "Num 10 not in field range 0 to 4");
+    fn new_fe(num: i64, prime: i64) -> FieldElement {
+        FieldElement::new(num, prime).unwrap()
     }
 
     #[test]
-    fn test_matching() {
-        let a = FieldElement::new(BigInt::from(7), BigInt::from(13));
-        let b = FieldElement::new(BigInt::from(6), BigInt::from(13));
+    fn equality_test() {
+        let prime = 31;
+        let a = new_fe(2, prime.clone());
+        let b = new_fe(2, prime.clone());
+        let c = new_fe(15, prime.clone());
 
-        assert_eq!(a == a, true);
-        assert_eq!(a == b, false);
+        assert_eq!(a, b);
+        assert_eq!(a != c, true);
+        assert_eq!(a != b, false);
     }
 
     #[test]
-    fn add() {
-        let a = FieldElement::new(BigInt::from(7), BigInt::from(19));
-        let b = FieldElement::new(BigInt::from(8), BigInt::from(19));
+    fn add_test() {
+        let prime = 31;
+        let a = new_fe(2, prime.clone());
+        let b = new_fe(15, prime.clone());
+        assert_eq!((a + b).unwrap(), new_fe(17, prime.clone()));
+
+        let c = new_fe(17, prime.clone());
+        let d = new_fe(21, prime.clone());
+        assert_eq!((c + d).unwrap(), new_fe(7, prime));
+    }
+
+    #[test]
+    fn sub_test() {
+        let prime = 31;
+        let a = new_fe(29, prime.clone());
+        let b = new_fe(4, prime.clone());
+        assert_eq!((a - b).unwrap(), new_fe(25, prime.clone()));
+
+        let c = new_fe(15, prime.clone());
+        let d = new_fe(30, prime.clone());
+        assert_eq!((c - d).unwrap(), new_fe(16, prime));
+    }
+
+    #[test]
+    fn mul_test() {
+        let prime = 31;
+        let a = new_fe(24, prime.clone());
+        let b = new_fe(19, prime.clone());
+
+        assert_eq!((a * b).unwrap(), new_fe(22, prime));
+    }
+
+    #[test]
+    fn pow_mod_test() {
+        let prime = 31;
+        let a = new_fe(17, prime.clone());
+        assert_eq!(a.pow_mod(BigInt::from(3)), new_fe(15, prime.clone()));
+
+        let b = new_fe(5, prime.clone());
+        let c = new_fe(18, prime.clone());
+
+        assert_eq!((b.pow_mod(BigInt::from(5)) * c).unwrap(), new_fe(16, prime));
+    }
+
+    #[test]
+    fn pow_mod_negative_test() {
+        let prime = 31;
+        let a = new_fe(17, prime.clone());
+        assert_eq!(a.pow_mod(BigInt::from(-3)), new_fe(29, prime.clone()));
+
+        let b = new_fe(4, prime.clone());
+        let c = new_fe(11, prime.clone());
 
         assert_eq!(
-            a.unwrap() + b.unwrap(),
-            FieldElement::new(BigInt::from(15), BigInt::from(19))
+            (b.pow_mod(BigInt::from(-4)) * c).unwrap(),
+            new_fe(13, prime.clone())
         );
     }
 
     #[test]
-    fn subtract() {
-        let a = FieldElement::new(BigInt::from(11), BigInt::from(19));
-        let b = FieldElement::new(BigInt::from(9), BigInt::from(19));
-
-        assert_eq!(
-            a.unwrap() - b.unwrap(),
-            FieldElement::new(BigInt::from(2), BigInt::from(19))
-        );
-    }
-
-    #[test]
-    fn multiply() {
-        let a = FieldElement::new(BigInt::from(5), BigInt::from(19));
-        let b = FieldElement::new(BigInt::from(3), BigInt::from(19));
-
-        assert_eq!(
-            a.unwrap() * b.unwrap(),
-            FieldElement::new(BigInt::from(15), BigInt::from(19))
-        );
-    }
-
-    #[test]
-    fn pow() {
-        let a = FieldElement::new(BigInt::from(7), BigInt::from(19));
-        assert_eq!(
-            a.unwrap().pow(BigInt::from(3)),
-            FieldElement::new(BigInt::from(1), BigInt::from(19))
-        );
-    }
-
-    #[test]
-    fn modpow() {
-        let a = FieldElement::new(BigInt::from(7), BigInt::from(13));
-        let b = FieldElement::new(BigInt::from(8), BigInt::from(13));
-        assert_eq!(
-            a.unwrap().pow(BigInt::from(-3)).unwrap() == b.unwrap(),
-            true
-        );
+    fn div_test() {
+        let prime = 31;
+        let a = new_fe(3, prime.clone());
+        let b = new_fe(24, prime.clone());
+        assert_eq!((a / b).unwrap(), new_fe(4, prime.clone()));
     }
 }
