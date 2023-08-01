@@ -27,6 +27,14 @@ impl FieldElement {
         })
     }
 
+    pub fn get_num(&self) -> &BigInt {
+        &self.num
+    }
+
+    pub fn get_prime(&self) -> &BigInt {
+        &self.prime
+    }
+
     pub fn pow_mod(&self, exponent: BigInt) -> FieldElement {
         let mut n = exponent;
         let prime = &self.prime;
@@ -183,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn pow_test() {
+    fn pow_mod_test() {
         let prime = 31;
         let a = new_fe(17, prime.clone());
         assert_eq!(a.pow_mod(BigInt::from(3)), new_fe(15, prime.clone()));
@@ -195,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn pow_negative_test() {
+    fn pow_mod_negative_test() {
         let prime = 31;
         let a = new_fe(17, prime.clone());
         assert_eq!(a.pow_mod(BigInt::from(-3)), new_fe(29, prime.clone()));
