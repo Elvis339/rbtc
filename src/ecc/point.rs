@@ -1,12 +1,13 @@
 use crate::ecc::field_element::FieldElement;
+use crate::ecc::scalar::Scalar;
 use num_bigint::BigInt;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub struct Point {
-    a: FieldElement,
-    b: FieldElement,
+    pub a: FieldElement,
+    pub b: FieldElement,
     x: Option<FieldElement>,
     y: Option<FieldElement>,
 }
@@ -94,8 +95,6 @@ impl Add for Point {
             ));
         }
 
-        let (_, prime) = self.a.clone().convert::<i64>()?;
-
         // Self is point at infinity
         if self.x.is_none() {
             return Ok(other);
@@ -160,35 +159,25 @@ impl Add for Point {
             let x1 = self.x.clone().expect("x1 is None");
             let y1 = self.y.clone().expect("y1 is None");
 
-            if prime < 3 {
-                return Err(format!("Prime {} too low!", prime));
-            }
+            // 3 * x1^2 + a
+            let quotient =
+                Scalar::new(3).mul(x1.clone().pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
+            // 2 * y1
+            let dividend = Scalar::new(2).mul(y1.clone())?;
 
-            let two = FieldElement::new(2, prime.clone())?;
-            let three = FieldElement::new(3, prime.clone())?;
-
-            // (3 * x1^2 + a)
-            let quotient = three
-                .mul(x1.clone().pow_mod(BigInt::from(2)))?
-                .add(self.a.clone())?;
-
-            // (2 * y1)
-            let divident = two.clone().mul(y1.clone())?;
-
-            // s = (3 * x1^2 + a) / (2 * y1)
-            let s = quotient.div(divident)?;
+            // (3 * x1^2 + a) / (2 * y1)
+            let s = quotient.div(dividend)?;
 
             // x3 = s^2 - 2 * x1
             let x3 = s
                 .clone()
                 .pow_mod(BigInt::from(2))
-                .sub(two)?
-                .mul(x1.clone())?;
+                .sub(Scalar::new(2).mul(x1.clone())?)?;
 
             // y3 = s * (x1 - x3) - y1
             let y3 = s.mul(x1.sub(x3.clone())?)?.sub(y1)?;
 
-            return Point::new(self.a, self.b, Some(x3), Some(y3));
+            return Point::new(self.a, self.b, Some(x3.clone()), Some(y3));
         }
 
         return Err(format!("Invalid"));
@@ -261,5 +250,28 @@ mod tests {
                 Point::new(a.clone(), b.clone(), Some(x3.clone()), Some(y3.clone())).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn add_same_point() {
+        let prime = 223;
+        let a = new_fe(0, prime.clone());
+        let b = new_fe(7, prime.clone());
+        let x = new_fe(47, prime.clone());
+        let y = new_fe(71, prime.clone());
+        let p = Point::new(a.clone(), b.clone(), Some(x), Some(y)).unwrap();
+
+        let result = (p.clone() + p.clone()).unwrap();
+
+        assert_eq!(
+            result,
+            Point::new(
+                a.clone(),
+                b.clone(),
+                Some(new_fe(36, prime.clone())),
+                Some(new_fe(111, prime.clone()))
+            )
+            .unwrap()
+        )
     }
 }

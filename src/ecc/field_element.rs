@@ -55,6 +55,13 @@ impl FieldElement {
 
         Ok((num, prime))
     }
+
+    pub fn construct_from(num: BigInt, prime: BigInt) -> Result<FieldElement, String> {
+        if num >= prime || num < BigInt::from(0) {
+            return Err(format!("Num {} not in field range 0 to {}", num, prime - 1));
+        }
+        Ok(Self { num, prime })
+    }
 }
 
 impl fmt::Display for FieldElement {
@@ -237,7 +244,9 @@ mod tests {
 
         // Verify: x^3 + 7 = (13^3 + 7) % 103 = 79
         assert_eq!(
-            x.pow_mod(BigInt::from(3)).add(new_fe(7, prime.clone())).unwrap(),
+            x.pow_mod(BigInt::from(3))
+                .add(new_fe(7, prime.clone()))
+                .unwrap(),
             new_fe(79, prime)
         )
     }
