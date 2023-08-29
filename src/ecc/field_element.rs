@@ -224,4 +224,21 @@ mod tests {
         let b = new_fe(24, prime.clone());
         assert_eq!((a / b).unwrap(), new_fe(4, prime.clone()));
     }
+
+    #[test]
+    fn verify_point() {
+        // y^2 = x^3 + 7 over finite field 103
+        let prime = 103;
+        let x = new_fe(17, prime.clone());
+        let y = new_fe(64, prime.clone());
+
+        // Verify: y2 = 64^2 % 103 = 79
+        assert_eq!(y.pow_mod(BigInt::from(2)), new_fe(79, prime.clone()));
+
+        // Verify: x^3 + 7 = (13^3 + 7) % 103 = 79
+        assert_eq!(
+            x.pow_mod(BigInt::from(3)).add(new_fe(7, prime.clone())).unwrap(),
+            new_fe(79, prime)
+        )
+    }
 }

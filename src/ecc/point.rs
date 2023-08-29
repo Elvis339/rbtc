@@ -1,7 +1,7 @@
 use crate::ecc::field_element::FieldElement;
 use num_bigint::BigInt;
 use std::fmt::{Display, Formatter};
-use std::ops::{Add, Deref, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub struct Point {
