@@ -1,6 +1,10 @@
-use num_bigint::BigInt;
 use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
+
+use num_bigint::BigInt;
+use num_traits::{One, Zero};
+
+use crate::ecc::error::FieldElementError;
 
 /// Finite Field Definition
 /// A finite field is defined as a finite set of numbers and two operations `+` and `*` and properties:
@@ -9,7 +13,6 @@ use std::ops::{Add, Div, Mul, Sub};
 /// 3. Multiplicative identity; means 1 exists and has the property a * 1 = a
 /// 4. Additive inverse; means if a is in the set, -a is in the set,
 /// which is defined as the value that makes a + (-a) = 0
-
 #[derive(Debug, Clone)]
 pub struct FieldElement {
     num: BigInt,
@@ -17,9 +20,13 @@ pub struct FieldElement {
 }
 
 impl FieldElement {
-    pub fn new(num: i64, prime: i64) -> Result<FieldElement, String> {
+    pub fn new(num: i64, prime: i64) -> Result<FieldElement, FieldElementError> {
         if num >= prime || num < 0 {
-            return Err(format!("Num {} not in field range 0 to {}", num, prime - 1));
+            return Err(FieldElementError::FieldNotInRange(format!(
+                "Num {} not in field range 0 to {}",
+                num,
+                prime - 1
+            )));
         }
         Ok(FieldElement {
             num: BigInt::from(num),
@@ -38,8 +45,8 @@ impl FieldElement {
     pub fn pow_mod(&self, exponent: BigInt) -> FieldElement {
         let mut n = exponent;
         let prime = &self.prime;
-        while n < BigInt::from(0) {
-            n += prime - 1;
+        while n < BigInt::zero() {
+            n += prime - BigInt::one();
         }
         let num = self.num.modpow(&n, &prime);
         FieldElement {
@@ -56,9 +63,13 @@ impl FieldElement {
         Ok((num, prime))
     }
 
-    pub fn construct_from(num: BigInt, prime: BigInt) -> Result<FieldElement, String> {
-        if num >= prime || num < BigInt::from(0) {
-            return Err(format!("Num {} not in field range 0 to {}", num, prime - 1));
+    pub fn construct_from(num: BigInt, prime: BigInt) -> Result<FieldElement, FieldElementError> {
+        if num >= prime || num < BigInt::zero() {
+            return Err(FieldElementError::FieldNotInRange(format!(
+                "Num {} not in field range 0 to {}",
+                num,
+                prime - BigInt::one()
+            )));
         }
         Ok(Self { num, prime })
     }
@@ -76,71 +87,144 @@ impl PartialEq for FieldElement {
     }
 }
 
-// To satisfy `closed` property one of the tools we can use to make a finite field closed under addition,
-// subtraction, multiplication, and division is modulo arithmetic.
-
 /// a + b = (a + b) % p
 impl Add for FieldElement {
-    type Output = Result<FieldElement, String>;
+    type Output = Result<FieldElement, FieldElementError>;
 
     fn add(self, rhs: Self) -> Self::Output {
         if self.prime != rhs.prime {
-            return Err("Cannot add two numbers in different Fields.".to_string());
+            return Err(FieldElementError::InvalidField(
+                "Cannot add two numbers in different Fields.".to_string(),
+            ));
         }
-        let prime = self.prime;
         let add = self.num + rhs.num;
-        let num = add % prime.clone();
-        Ok(FieldElement { num, prime })
+        let num = add % &self.prime;
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
+    }
+}
+
+impl Add<&FieldElement> for FieldElement {
+    type Output = Result<FieldElement, FieldElementError>;
+
+    fn add(self, rhs: &FieldElement) -> Self::Output {
+        if self.prime != rhs.prime {
+            return Err(FieldElementError::InvalidField(
+                "Cannot add two numbers in different Fields.".to_string(),
+            ));
+        }
+        let add = self.num + &rhs.num;
+        let num = add % &self.prime;
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
     }
 }
 
 /// a - b = (a - b) % p
 impl Sub for FieldElement {
-    type Output = Result<FieldElement, String>;
+    type Output = Result<FieldElement, FieldElementError>;
 
     fn sub(self, rhs: Self) -> Self::Output {
         if self.prime != rhs.prime {
-            return Err("Cannot subtract two numbers in different Fields.".to_string());
+            return Err(FieldElementError::InvalidField(
+                "Cannot subtract two numbers in different Fields.".to_string(),
+            ));
         }
-        let prime = self.prime;
         let sub = self.num - rhs.num;
-        let mut num = sub % prime.clone();
+        let mut num = sub % &self.prime;
 
-        if num < BigInt::from(0) {
-            num += prime.clone();
+        if num < BigInt::zero() {
+            num += &self.prime;
         }
 
-        Ok(FieldElement { num, prime })
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
+    }
+}
+
+impl Sub<&FieldElement> for FieldElement {
+    type Output = Result<FieldElement, FieldElementError>;
+
+    fn sub(self, rhs: &FieldElement) -> Self::Output {
+        if self.prime != rhs.prime {
+            return Err(FieldElementError::InvalidField(
+                "Cannot subtract two numbers in different Fields.".to_string(),
+            ));
+        }
+        let sub = &self.num - &rhs.num;
+        let mut num = sub % &self.prime;
+
+        if num < BigInt::zero() {
+            num += &self.prime;
+        }
+
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
     }
 }
 
 /// a * b = (a * b) % p
 impl Mul for FieldElement {
-    type Output = Result<FieldElement, String>;
+    type Output = Result<FieldElement, FieldElementError>;
 
     fn mul(self, rhs: Self) -> Self::Output {
         if self.prime != rhs.prime {
-            return Err("Cannot multiply two numbers in different Fields.".to_string());
+            return Err(FieldElementError::InvalidField(
+                "Cannot multiply two numbers in different Fields.".to_string(),
+            ));
         }
-        let prime = self.prime;
         let mul = self.num * rhs.num;
-        let num = mul % prime.clone();
-        Ok(FieldElement { num, prime })
+        let num = mul % &self.prime;
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
+    }
+}
+
+impl Mul<&FieldElement> for FieldElement {
+    type Output = Result<FieldElement, FieldElementError>;
+
+    fn mul(self, rhs: &FieldElement) -> Self::Output {
+        if self.prime != rhs.prime {
+            return Err(FieldElementError::InvalidField(
+                "Cannot multiply two numbers in different Fields.".to_string(),
+            ));
+        }
+        let mul = self.num * &rhs.num;
+        let num = mul % &self.prime;
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
     }
 }
 
 // p = 19
 // 2/7 = 2*7^(19-2) = 2 * 7^17 = 465261027974414 % 19 = 3
 impl Div for FieldElement {
-    type Output = Result<FieldElement, String>;
+    type Output = Result<FieldElement, FieldElementError>;
 
     fn div(self, rhs: Self) -> Self::Output {
         if self.prime != rhs.prime {
-            return Err("Cannot multiply two numbers in different Fields.".to_string());
+            return Err(FieldElementError::InvalidField(
+                "Cannot multiply two numbers in different Fields.".to_string(),
+            ));
         }
-        let prime = self.prime;
-        let num = self.num * rhs.num.modpow(&prime.clone().sub(2), &prime) % prime.clone();
-        Ok(FieldElement { num, prime })
+        let exp = &self.prime - BigInt::from(2u8);
+        let num = self.num * rhs.num.modpow(&exp, &self.prime) % &self.prime;
+        Ok(FieldElement {
+            num,
+            prime: self.prime.clone(),
+        })
     }
 }
 
@@ -150,6 +234,15 @@ mod tests {
 
     fn new_fe(num: i64, prime: i64) -> FieldElement {
         FieldElement::new(num, prime).unwrap()
+    }
+
+    #[test]
+    fn err() {
+        assert!(FieldElement::new(5, 3).is_err());
+        assert!(FieldElement::new(3, 3).is_err());
+        assert!((new_fe(2, 31) + new_fe(2, 7)).is_err());
+        assert!((new_fe(2, 31) - new_fe(2, 7)).is_err());
+        assert!((new_fe(2, 31) * new_fe(2, 7)).is_err());
     }
 
     #[test]
@@ -201,12 +294,15 @@ mod tests {
     fn pow_mod_test() {
         let prime = 31;
         let a = new_fe(17, prime.clone());
-        assert_eq!(a.pow_mod(BigInt::from(3)), new_fe(15, prime.clone()));
+        assert_eq!(a.pow_mod(BigInt::from(3u8)), new_fe(15, prime.clone()));
 
         let b = new_fe(5, prime.clone());
         let c = new_fe(18, prime.clone());
 
-        assert_eq!((b.pow_mod(BigInt::from(5)) * c).unwrap(), new_fe(16, prime));
+        assert_eq!(
+            (b.pow_mod(BigInt::from(5u8)) * c).unwrap(),
+            new_fe(16, prime)
+        );
     }
 
     #[test]

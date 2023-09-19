@@ -1,15 +1,19 @@
-use crate::ecc::field_element::FieldElement;
-use crate::ecc::scalar::Scalar;
-use num_bigint::BigInt;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, Sub};
+
+use crate::ecc::error::FieldElementError;
+use num_bigint::BigInt;
+use num_traits::Zero;
+
+use crate::ecc::field_element::FieldElement;
+use crate::ecc::scalar::Scalar;
 
 #[derive(Debug, Clone)]
 pub struct Point {
     pub a: FieldElement,
     pub b: FieldElement,
-    x: Option<FieldElement>,
-    y: Option<FieldElement>,
+    x: Option<FieldElement>, // Point at Infinity
+    y: Option<FieldElement>, // Point at Infinity
 }
 
 impl Point {
@@ -18,8 +22,8 @@ impl Point {
         b: FieldElement,
         x: Option<FieldElement>,
         y: Option<FieldElement>,
-    ) -> Result<Point, String> {
-        if x.is_none() && y.is_none() {
+    ) -> Result<Point, FieldElementError> {
+        if x.is_none() || y.is_none() {
             return Ok(Self {
                 a,
                 b,
@@ -27,25 +31,34 @@ impl Point {
                 y: None,
             });
         }
+        let y_squared = &y
+            .as_ref()
+            .map(|y| {
+                let exp = BigInt::from(2u8);
+                y.pow_mod(exp)
+            })
+            .unwrap();
 
-        let binding_x = x.clone().unwrap();
-        let binding_y = y.clone().unwrap();
+        let equation = &x
+            .as_ref()
+            .map(|x_value| {
+                // x^3 + ax + b
+                let exp = BigInt::from(3u8);
+                let ax = a.clone().mul(x_value)?;
+                x_value.pow_mod(exp).add(ax)?.add(b.clone())
+            })
+            .unwrap()
+            .expect(format!("x={} is not on the curve", x.clone().unwrap()).as_str());
 
-        // x^3 + a*x + b
-        let curve = binding_x
-            .pow_mod(BigInt::from(3))
-            .add(a.clone().mul(binding_x.clone())?)?
-            .add(b.clone())?;
-
-        if binding_y.clone().pow_mod(BigInt::from(2)) != curve {
-            return Err(format!(
-                "({}, {}) is not on the curve!",
+        if y_squared != equation {
+            return Err(FieldElementError::PointNotOnTheCurve(format!(
+                "({}, {}) is not on the curve",
                 x.unwrap(),
                 y.unwrap()
-            ));
+            )));
         }
 
-        return Ok(Point { a, b, x, y });
+        Ok(Self { a, b, x, y })
     }
 }
 
@@ -68,14 +81,14 @@ impl Display for Point {
         let prime = self.a.get_prime();
         let y = self
             .y
-            .clone()
+            .as_ref()
             .map(|v| format!("FieldElement_{}({})", v.get_num(), v.get_prime()))
             .unwrap_or_else(|| format!("FieldElement_None({})", prime));
 
         return write!(
             f,
             "Point({}, {})_{}_{} FieldElement({})",
-            &self.x.clone().unwrap(),
+            self.x.as_ref().unwrap(),
             y,
             &self.a,
             &self.b,
@@ -85,14 +98,14 @@ impl Display for Point {
 }
 
 impl Add for Point {
-    type Output = Result<Point, String>;
+    type Output = Result<Point, FieldElementError>;
 
     fn add(self, other: Self) -> Self::Output {
         if self.a != other.a && self.b != other.b {
-            return Err(format!(
+            return Err(FieldElementError::PointNotOnTheCurve(format!(
                 "Points {}, {} are not on the same curve",
                 self, other
-            ));
+            )));
         }
 
         // Self is point at infinity
@@ -113,38 +126,31 @@ impl Add for Point {
         // Different x
         // P1 + P2 = P3
         if self.x != other.x {
-            let y1 = self.y.clone().expect("y1 is None");
-            let y2 = other.y.clone().expect("y2 is None");
+            let y1 = self.y.as_ref().expect("y1 point is None");
+            let y2 = other.y.as_ref().expect("y2 point is None");
 
-            let x1 = self.x.clone().expect("x1 is None");
-            let x2 = other.x.clone().expect("x2 is None");
+            let x1 = self.x.as_ref().expect("x1 point is None");
+            let x2 = other.x.as_ref().expect("x2 point is None");
 
             // slope = (y2 - y1) / (x2 - x1)
-            let slope = y2
-                .clone()
-                .sub(y1.clone())?
-                .div(x2.clone().sub(x1.clone())?)?;
+            let slope = (y2.clone().sub(y1)? / x2.clone().sub(x1)?)?;
 
             // x3 = slope^2 - x1 - x2
-            let x3 = slope
-                .clone()
-                .pow_mod(BigInt::from(2))
-                .sub(x1.clone())?
-                .sub(x2)?;
+            let x3 = &slope.pow_mod(BigInt::from(2u8)).sub(x1)?.sub(x2)?;
 
             // y3 = slope * (x1 - x3) - y1
-            let y3 = slope.mul(x1.sub(x3.clone())?)?.sub(y1)?;
+            let y3 = &slope.mul(x1.clone().sub(x3)?)?.sub(y1)?;
 
-            return Point::new(self.a, self.b, Some(x3), Some(y3));
+            return Point::new(self.a, self.b, Some(x3.clone()), Some(y3.clone()));
         }
 
         let zero = self
             .y
-            .clone()
+            .as_ref()
             .map(|y1| {
-                let binding = self.x.clone().unwrap();
+                let binding = self.x.as_ref().unwrap();
                 let x = binding.get_num();
-                *y1.get_num() == BigInt::from(0).mul(x)
+                *y1.get_num() == BigInt::zero().mul(x)
             })
             .unwrap_or(false);
 
@@ -160,27 +166,25 @@ impl Add for Point {
             let y1 = self.y.clone().expect("y1 is None");
 
             // 3 * x1^2 + a
-            let quotient =
-                Scalar::new(3).mul(x1.clone().pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
+            let quotient = Scalar::new(3).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
             // 2 * y1
-            let dividend = Scalar::new(2).mul(y1.clone())?;
+            let dividend = Scalar::new(2).mul(&y1)?;
 
-            // (3 * x1^2 + a) / (2 * y1)
             let s = quotient.div(dividend)?;
 
             // x3 = s^2 - 2 * x1
             let x3 = s
                 .clone()
                 .pow_mod(BigInt::from(2))
-                .sub(Scalar::new(2).mul(x1.clone())?)?;
+                .sub(Scalar::new(2).mul(&x1)?)?;
 
             // y3 = s * (x1 - x3) - y1
-            let y3 = s.mul(x1.sub(x3.clone())?)?.sub(y1)?;
+            let y3 = s.mul(&x1.sub(&x3)?)?.sub(&y1)?;
 
             return Point::new(self.a, self.b, Some(x3.clone()), Some(y3));
         }
 
-        return Err(format!("Invalid"));
+        return Err(FieldElementError::PointNotOnTheCurve(format!("Invalid")));
     }
 }
 
@@ -269,9 +273,9 @@ mod tests {
                 a.clone(),
                 b.clone(),
                 Some(new_fe(36, prime.clone())),
-                Some(new_fe(111, prime.clone()))
+                Some(new_fe(111, prime.clone())),
             )
-            .unwrap()
+                .unwrap()
         )
     }
 }

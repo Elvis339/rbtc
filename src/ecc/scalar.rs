@@ -1,6 +1,8 @@
+use crate::ecc::error::FieldElementError;
+use std::ops::Mul;
+
 use crate::ecc::field_element::FieldElement;
 use crate::ecc::point::Point;
-use std::ops::Mul;
 
 #[derive(Debug, Clone)]
 pub struct Scalar {
@@ -14,7 +16,7 @@ impl Scalar {
 }
 
 impl Mul<FieldElement> for Scalar {
-    type Output = Result<FieldElement, String>;
+    type Output = Result<FieldElement, FieldElementError>;
 
     // Naive impl
     fn mul(self, rhs: FieldElement) -> Self::Output {
@@ -32,8 +34,28 @@ impl Mul<FieldElement> for Scalar {
     }
 }
 
+impl Mul<&FieldElement> for Scalar {
+    type Output = Result<FieldElement, FieldElementError>;
+
+    // Naive impl
+    fn mul(self, rhs: &FieldElement) -> Self::Output {
+        let prime = rhs.get_prime();
+        let num = rhs.get_num();
+
+        let mut result = FieldElement::construct_from(num.clone(), prime.clone())?;
+
+        let end = self.value;
+
+        for _ in 1..end {
+            result = (result + rhs)?
+        }
+
+        Ok(result)
+    }
+}
+
 impl Mul<Point> for Scalar {
-    type Output = Result<Point, String>;
+    type Output = Result<Point, FieldElementError>;
 
     // Naive impl
     fn mul(self, rhs: Point) -> Self::Output {
@@ -81,7 +103,7 @@ mod tests {
                 a,
                 b,
                 Some(new_fe(154, prime.clone())),
-                Some(new_fe(150, prime.clone()))
+                Some(new_fe(150, prime.clone())),
             )
         )
     }
