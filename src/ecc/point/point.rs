@@ -188,10 +188,110 @@ impl Add for Point {
     }
 }
 
+impl<'a, 'b> Add<&'b Point> for &'a Point {
+    type Output = Result<Point, FieldElementError>;
+
+    fn add(self, other: &'b Point) -> Self::Output {
+        if self.a != other.a && self.b != other.b {
+            return Err(FieldElementError::PointNotOnTheCurve(format!(
+                "Points {}, {} are not on the same curve",
+                self, other
+            )));
+        }
+
+        // Self is point at infinity
+        if self.x.is_none() {
+            return Ok(other.clone());
+        }
+
+        // Other is point at infinity
+        if other.x.is_none() {
+            return Ok(self.clone());
+        }
+
+        // Same x but different y (Additive inverse)
+        if self.x == other.x && self.y != other.y {
+            return Point::new(
+                self.a.clone(),
+                self.b.clone(),
+                self.x.clone(),
+                self.y.clone(),
+            );
+        }
+
+        // Different x
+        // P1 + P2 = P3
+        if self.x != other.x {
+            let y1 = self.y.as_ref().expect("y1 point is None");
+            let y2 = other.y.as_ref().expect("y2 point is None");
+
+            let x1 = self.x.as_ref().expect("x1 point is None");
+            let x2 = other.x.as_ref().expect("x2 point is None");
+
+            // slope = (y2 - y1) / (x2 - x1)
+            let slope = (y2.clone().sub(y1)? / x2.clone().sub(x1)?)?;
+
+            // x3 = slope^2 - x1 - x2
+            let x3 = &slope.pow_mod(BigInt::from(2u8)).sub(x1)?.sub(x2)?;
+
+            // y3 = slope * (x1 - x3) - y1
+            let y3 = &slope.mul(x1.clone().sub(x3)?)?.sub(y1)?;
+
+            return Point::new(
+                self.a.clone(),
+                self.b.clone(),
+                Some(x3.clone()),
+                Some(y3.clone()),
+            );
+        }
+
+        let zero = self
+            .y
+            .as_ref()
+            .map(|y1| {
+                let binding = self.x.as_ref().unwrap();
+                let x = binding.get_num();
+                *y1.get_num() == BigInt::zero().mul(x)
+            })
+            .unwrap_or(false);
+
+        // If we are tangent to the vertical line, we return point at infinity
+        if *self == *other && zero {
+            return Point::new(self.a.clone(), self.b.clone(), None, None);
+        }
+
+        // P1 + P1 = P2
+        // Adding same point
+        if *self == *other {
+            let x1 = self.x.clone().expect("x1 is None");
+            let y1 = self.y.clone().expect("y1 is None");
+
+            // 3 * x1^2 + a
+            let quotient = Scalar::new(3).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
+            // 2 * y1
+            let dividend = Scalar::new(2).mul(&y1)?;
+
+            let s = quotient.div(dividend)?;
+
+            // x3 = s^2 - 2 * x1
+            let x3 = s
+                .clone()
+                .pow_mod(BigInt::from(2))
+                .sub(Scalar::new(2).mul(&x1)?)?;
+
+            // y3 = s * (x1 - x3) - y1
+            let y3 = s.mul(&x1.sub(&x3)?)?.sub(&y1)?;
+
+            return Point::new(self.a.clone(), self.b.clone(), Some(x3.clone()), Some(y3));
+        }
+
+        return Err(FieldElementError::PointNotOnTheCurve(format!("Invalid")));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::ecc::field_element::FieldElement;
-    use crate::ecc::point::Point;
+    use super::*;
 
     fn new_fe(num: i64, prime: i64) -> FieldElement {
         FieldElement::new(num, prime).unwrap()
@@ -254,6 +354,31 @@ mod tests {
                 Point::new(a.clone(), b.clone(), Some(x3.clone()), Some(y3.clone())).unwrap()
             );
         }
+
+        let p1 = Point::new(
+            a.clone(),
+            b.clone(),
+            Some(new_fe(192, prime.clone())),
+            Some(new_fe(105, prime.clone())),
+        )
+        .unwrap();
+        let p2 = Point::new(
+            a.clone(),
+            b.clone(),
+            Some(new_fe(17, prime.clone())),
+            Some(new_fe(56, prime.clone())),
+        )
+        .unwrap();
+        assert_eq!(
+            (&p1 + &p2).unwrap(),
+            Point::new(
+                a.clone(),
+                b.clone(),
+                Some(new_fe(170, prime.clone())),
+                Some(new_fe(142, prime.clone()))
+            )
+            .unwrap()
+        );
     }
 
     #[test]
@@ -275,7 +400,27 @@ mod tests {
                 Some(new_fe(36, prime.clone())),
                 Some(new_fe(111, prime.clone())),
             )
-                .unwrap()
+            .unwrap()
         )
     }
+
+    // #[test]
+    // fn scalar_multiplication_point() {
+    //     let prime = 223;
+    //     let a = new_fe(0, prime.clone());
+    //     let b = new_fe(7, prime.clone());
+    //     let x = new_fe(47, prime.clone());
+    //     let y = new_fe(71, prime.clone());
+    //     let p = Point::new(a.clone(), b.clone(), Some(x), Some(y)).unwrap();
+    //
+    //     assert_eq!(
+    //         Scalar::new(10) * p,
+    //         Point::new(
+    //             a,
+    //             b,
+    //             Some(new_fe(154, prime.clone())),
+    //             Some(new_fe(150, prime.clone())),
+    //         )
+    //     )
+    // }
 }
