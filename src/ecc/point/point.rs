@@ -1,28 +1,26 @@
 use std::fmt::{Display, Formatter};
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Mul};
 
-use crate::ecc::error::FieldElementError;
 use num_bigint::BigInt;
 use num_traits::Zero;
 
+use crate::ecc::abstractions::FieldElementTrait;
+use crate::ecc::error::FieldElementError;
 use crate::ecc::field_element::FieldElement;
 use crate::ecc::scalar::Scalar;
 
+// use crate::ecc::scalar::Scalar;
+
 #[derive(Debug, Clone)]
-pub struct Point {
-    pub a: FieldElement,
-    pub b: FieldElement,
-    x: Option<FieldElement>, // Point at Infinity
-    y: Option<FieldElement>, // Point at Infinity
+pub struct Point<F: FieldElementTrait + Clone> {
+    pub a: F,
+    pub b: F,
+    pub x: Option<F>, // Point at Infinity
+    pub y: Option<F>, // Point at Infinity
 }
 
-impl Point {
-    pub fn new(
-        a: FieldElement,
-        b: FieldElement,
-        x: Option<FieldElement>,
-        y: Option<FieldElement>,
-    ) -> Result<Point, FieldElementError> {
+impl<F: FieldElementTrait + Clone> Point<F> {
+    pub fn new(a: F, b: F, x: Option<F>, y: Option<F>) -> Result<Point<F>, FieldElementError> {
         if x.is_none() || y.is_none() {
             return Ok(Self {
                 a,
@@ -60,9 +58,32 @@ impl Point {
 
         Ok(Self { a, b, x, y })
     }
+
+    fn is_additive_inverse(&self, other: &Self) -> bool {
+        self.x == other.x && self.y != other.y
+    }
+
+    fn is_on_vertical_line(&self) -> bool {
+        if let Some(y1) = &self.y {
+            if let Some(_) = &self.x {
+                return *y1.get_num() == BigInt::zero();
+            }
+        }
+        false
+    }
+
+    fn check_points_on_the_curve(&self, other: &Self) -> Result<(), FieldElementError> {
+        if self.a != other.a && self.b != other.b {
+            return Err(FieldElementError::PointNotOnTheCurve(format!(
+                "Points {}, {} are not on the same curve",
+                self, other
+            )));
+        }
+        Ok(())
+    }
 }
 
-impl PartialEq for Point {
+impl<F: FieldElementTrait + Clone> PartialEq for Point<F> {
     fn eq(&self, other: &Self) -> bool {
         &self.x == &other.x && &self.y == &other.y && &self.a == &other.a && self.b == other.b
     }
@@ -72,7 +93,7 @@ impl PartialEq for Point {
     }
 }
 
-impl Display for Point {
+impl<F: FieldElementTrait + Clone> Display for Point<F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.x.is_none() {
             return write!(f, "Point(infinity)");
@@ -97,16 +118,11 @@ impl Display for Point {
     }
 }
 
-impl Add for Point {
-    type Output = Result<Point, FieldElementError>;
+impl<F: FieldElementTrait + Clone> Add for Point<F> {
+    type Output = Result<Point<F>, FieldElementError>;
 
     fn add(self, other: Self) -> Self::Output {
-        if self.a != other.a && self.b != other.b {
-            return Err(FieldElementError::PointNotOnTheCurve(format!(
-                "Points {}, {} are not on the same curve",
-                self, other
-            )));
-        }
+        self.check_points_on_the_curve(&other)?;
 
         // Self is point at infinity
         if self.x.is_none() {
@@ -119,18 +135,15 @@ impl Add for Point {
         }
 
         // Same x but different y (Additive inverse)
-        if self.x == other.x && self.y != other.y {
+        if self.is_additive_inverse(&other) {
             return Point::new(self.a, self.b, self.x, self.y);
         }
 
         // Different x
         // P1 + P2 = P3
         if self.x != other.x {
-            let y1 = self.y.as_ref().expect("y1 point is None");
-            let y2 = other.y.as_ref().expect("y2 point is None");
-
-            let x1 = self.x.as_ref().expect("x1 point is None");
-            let x2 = other.x.as_ref().expect("x2 point is None");
+            let (x1, y1) = (self.x.as_ref().unwrap(), self.y.as_ref().unwrap());
+            let (x2, y2) = (other.x.as_ref().unwrap(), other.y.as_ref().unwrap());
 
             // slope = (y2 - y1) / (x2 - x1)
             let slope = (y2.clone().sub(y1)? / x2.clone().sub(x1)?)?;
@@ -144,31 +157,21 @@ impl Add for Point {
             return Point::new(self.a, self.b, Some(x3.clone()), Some(y3.clone()));
         }
 
-        let zero = self
-            .y
-            .as_ref()
-            .map(|y1| {
-                let binding = self.x.as_ref().unwrap();
-                let x = binding.get_num();
-                *y1.get_num() == BigInt::zero().mul(x)
-            })
-            .unwrap_or(false);
-
         // If we are tangent to the vertical line, we return point at infinity
-        if self == other && zero {
+        if self == other && self.is_on_vertical_line() {
             return Point::new(self.a, self.b, None, None);
         }
 
         // P1 + P1 = P2
         // Adding same point
         if self == other {
-            let x1 = self.x.clone().expect("x1 is None");
-            let y1 = self.y.clone().expect("y1 is None");
+            let (x1, y1) = (self.x.as_ref().unwrap(), self.y.as_ref().unwrap());
 
             // 3 * x1^2 + a
-            let quotient = Scalar::new(3).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
+            let quotient =
+                Scalar::from(3u8).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
             // 2 * y1
-            let dividend = Scalar::new(2).mul(&y1)?;
+            let dividend = Scalar::from(2u8).mul(y1)?;
 
             let s = quotient.div(dividend)?;
 
@@ -176,10 +179,10 @@ impl Add for Point {
             let x3 = s
                 .clone()
                 .pow_mod(BigInt::from(2))
-                .sub(Scalar::new(2).mul(&x1)?)?;
+                .sub(Scalar::from(2u8).mul(x1)?)?;
 
             // y3 = s * (x1 - x3) - y1
-            let y3 = s.mul(&x1.sub(&x3)?)?.sub(&y1)?;
+            let y3 = s.mul(x1.clone().sub(&x3)?)?.sub(y1)?;
 
             return Point::new(self.a, self.b, Some(x3.clone()), Some(y3));
         }
@@ -188,16 +191,11 @@ impl Add for Point {
     }
 }
 
-impl<'a, 'b> Add<&'b Point> for &'a Point {
-    type Output = Result<Point, FieldElementError>;
+impl<'a, 'b, F: FieldElementTrait + Clone> Add<&'b Point<F>> for &'a Point<F> {
+    type Output = Result<Point<F>, FieldElementError>;
 
-    fn add(self, other: &'b Point) -> Self::Output {
-        if self.a != other.a && self.b != other.b {
-            return Err(FieldElementError::PointNotOnTheCurve(format!(
-                "Points {}, {} are not on the same curve",
-                self, other
-            )));
-        }
+    fn add(self, other: &'b Point<F>) -> Self::Output {
+        self.check_points_on_the_curve(&other)?;
 
         // Self is point at infinity
         if self.x.is_none() {
@@ -210,7 +208,7 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
         }
 
         // Same x but different y (Additive inverse)
-        if self.x == other.x && self.y != other.y {
+        if self.is_additive_inverse(&other) {
             return Point::new(
                 self.a.clone(),
                 self.b.clone(),
@@ -222,11 +220,8 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
         // Different x
         // P1 + P2 = P3
         if self.x != other.x {
-            let y1 = self.y.as_ref().expect("y1 point is None");
-            let y2 = other.y.as_ref().expect("y2 point is None");
-
-            let x1 = self.x.as_ref().expect("x1 point is None");
-            let x2 = other.x.as_ref().expect("x2 point is None");
+            let (x1, y1) = (self.x.as_ref().unwrap(), self.y.as_ref().unwrap());
+            let (x2, y2) = (other.x.as_ref().unwrap(), other.y.as_ref().unwrap());
 
             // slope = (y2 - y1) / (x2 - x1)
             let slope = (y2.clone().sub(y1)? / x2.clone().sub(x1)?)?;
@@ -245,31 +240,21 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
             );
         }
 
-        let zero = self
-            .y
-            .as_ref()
-            .map(|y1| {
-                let binding = self.x.as_ref().unwrap();
-                let x = binding.get_num();
-                *y1.get_num() == BigInt::zero().mul(x)
-            })
-            .unwrap_or(false);
-
         // If we are tangent to the vertical line, we return point at infinity
-        if *self == *other && zero {
+        if self == other && self.is_on_vertical_line() {
             return Point::new(self.a.clone(), self.b.clone(), None, None);
         }
 
         // P1 + P1 = P2
         // Adding same point
         if *self == *other {
-            let x1 = self.x.clone().expect("x1 is None");
-            let y1 = self.y.clone().expect("y1 is None");
+            let (x1, y1) = (self.x.as_ref().unwrap(), self.y.as_ref().unwrap());
 
             // 3 * x1^2 + a
-            let quotient = Scalar::new(3).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
+            let quotient =
+                Scalar::from(3u8).mul(&x1.pow_mod(BigInt::from(2)).add(self.a.clone())?)?;
             // 2 * y1
-            let dividend = Scalar::new(2).mul(&y1)?;
+            let dividend = Scalar::from(2u8).mul(y1)?;
 
             let s = quotient.div(dividend)?;
 
@@ -277,10 +262,10 @@ impl<'a, 'b> Add<&'b Point> for &'a Point {
             let x3 = s
                 .clone()
                 .pow_mod(BigInt::from(2))
-                .sub(Scalar::new(2).mul(&x1)?)?;
+                .sub(Scalar::from(2u8).mul(x1)?)?;
 
             // y3 = s * (x1 - x3) - y1
-            let y3 = s.mul(&x1.sub(&x3)?)?.sub(&y1)?;
+            let y3 = s.mul(x1.clone().sub(&x3)?)?.sub(y1)?;
 
             return Point::new(self.a.clone(), self.b.clone(), Some(x3.clone()), Some(y3));
         }
@@ -375,7 +360,7 @@ mod tests {
                 a.clone(),
                 b.clone(),
                 Some(new_fe(170, prime.clone())),
-                Some(new_fe(142, prime.clone()))
+                Some(new_fe(142, prime.clone())),
             )
             .unwrap()
         );
